@@ -1,5 +1,5 @@
 # Variáveis
-IMG ?= ghcr.io/your-org/customhpa-controller:latest
+IMG ?= ghcr.io/pisanix-labs/customhpa-controller:latest
 PKG := github.com/pisanix-labs/go-operator-customhpa
 
 .PHONY: all build run docker-build docker-push deploy undeploy crd rbac manager

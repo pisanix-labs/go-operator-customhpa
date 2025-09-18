@@ -18,7 +18,7 @@ spec:
       serviceAccountName: customhpa-controller
       containers:
         - name: manager
-          image: ghcr.io/your-org/customhpa-controller:latest
+          image: ghcr.io/pisanix-labs/customhpa-controller:latest
           imagePullPolicy: IfNotPresent
           args:
             - "--metrics-bind-address=:8080"
