@@ -121,6 +121,50 @@ kubectl get deploy,pods -l app=sample-web --kubeconfig=./kind/kubeconfig-kind.ya
 - `kubectl describe customhpa sample-web-chpa --kubeconfig=./kind/kubeconfig-kind.yaml` para ver condições e eventos (ex.: `Scaled`).
 - `kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml` para inspecionar réplicas.
 
+## Alterar réplicas via variável de ambiente (ao vivo)
+
+Você pode ajustar o número de réplicas desejadas alterando a env `CHPA_DESIRED_REPLICAS` no Deployment do operator e observar o efeito no Deployment alvo (respeitando `minReplicas`/`maxReplicas`).
+
+Passo a passo (usando o cluster Kind deste repo):
+
+1) Verifique o valor atual da env no operator:
+
+```
+kubectl set env deploy/customhpa-controller --list -n default --kubeconfig=./kind/kubeconfig-kind.yaml
+```
+
+2) Altere o valor desejado (ex.: de 2 para 4):
+
+```
+kubectl set env deploy/customhpa-controller -n default \
+  CHPA_DESIRED_REPLICAS=4 --kubeconfig=./kind/kubeconfig-kind.yaml
+
+kubectl rollout status deploy/customhpa-controller -n default --kubeconfig=./kind/kubeconfig-kind.yaml
+```
+
+3) Observe a reconciliação e a escala do alvo:
+
+```
+# Eventos e condições do CustomHPA
+kubectl describe customhpa sample-web-chpa --kubeconfig=./kind/kubeconfig-kind.yaml
+
+# Réplicas aplicadas ao Deployment alvo
+kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml; echo
+```
+
+4) (Opcional) Teste o limite por `maxReplicas`: defina um valor acima do máximo (ex.: 10) e observe que o operator fará clamp para `maxReplicas` (5 no exemplo):
+
+```
+kubectl set env deploy/customhpa-controller -n default \
+  CHPA_DESIRED_REPLICAS=10 --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl rollout status deploy/customhpa-controller -n default --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml; echo
+```
+
+Notas:
+- A reconciliação ocorre periodicamente conforme `spec.intervalSeconds` do CR (ex.: 30s). Após o rollout do operator com a nova env, aguarde até um ciclo para a aplicação no alvo.
+- Rodando o controller localmente com `go run ./cmd/manager`, exporte a env no seu shell antes de iniciar: `export CHPA_DESIRED_REPLICAS=4 && go run ./cmd/manager` (reinicie o processo para alterar o valor).
+
 ## Build e Deploy com Makefile
 
 - Ajuste `IMG` conforme seu registry (por padrão `ghcr.io/pisanix-labs/customhpa-controller:latest`).
