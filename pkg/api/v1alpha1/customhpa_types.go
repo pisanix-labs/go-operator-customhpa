@@ -9,7 +9,6 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=customhpas,scope=Namespaced,shortName=chpa
-// +kubebuilder:printcolumn:name="Query",type=string,JSONPath=`.spec.promQL`
 // +kubebuilder:printcolumn:name="Min",type=integer,JSONPath=`.spec.minReplicas`
 // +kubebuilder:printcolumn:name="Max",type=integer,JSONPath=`.spec.maxReplicas`
 // +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.spec.targetRef.name`
@@ -30,10 +29,6 @@ type ObjectRef struct {
 }
 
 type CustomHPASpec struct {
-    // Prometheus base URL, e.g. http://prometheus.monitoring.svc:9090
-    PrometheusURL string `json:"prometheusURL"`
-    // Prometheus query to evaluate.
-    PromQL string `json:"promQL"`
     // Minimum replicas to keep.
     MinReplicas int32 `json:"minReplicas"`
     // Maximum replicas allowed.
@@ -47,8 +42,6 @@ type CustomHPASpec struct {
 type CustomHPAStatus struct {
     // Current replicas observed on the target Deployment.
     CurrentReplicas int32 `json:"currentReplicas,omitempty"`
-    // Last value returned by the PromQL query.
-    LastQueryValue float64 `json:"lastQueryValue,omitempty"`
     // Last time we performed a scale action.
     LastScaleTime *metav1.Time `json:"lastScaleTime,omitempty"`
     // Conditions for readiness and errors.
@@ -86,7 +79,6 @@ func (in *CustomHPA) DeepCopyInto(out *CustomHPA) {
     out.Spec = in.Spec
     // Deep copy de Status
     out.Status.CurrentReplicas = in.Status.CurrentReplicas
-    out.Status.LastQueryValue = in.Status.LastQueryValue
     if in.Status.LastScaleTime != nil {
         t := *in.Status.LastScaleTime
         out.Status.LastScaleTime = &t

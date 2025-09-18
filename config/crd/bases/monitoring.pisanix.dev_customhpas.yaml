@@ -23,14 +23,8 @@ spec:
           properties:
             spec:
               type: object
-              required: [prometheusURL, promQL, minReplicas, maxReplicas, targetRef]
+              required: [minReplicas, maxReplicas, targetRef]
               properties:
-                prometheusURL:
-                  type: string
-                  minLength: 1
-                promQL:
-                  type: string
-                  minLength: 1
                 minReplicas:
                   type: integer
                   format: int32
@@ -57,9 +51,6 @@ spec:
                 currentReplicas:
                   type: integer
                   format: int32
-                lastQueryValue:
-                  type: number
-                  format: double
                 lastScaleTime:
                   type: string
                   format: date-time
@@ -82,9 +73,6 @@ spec:
                       message:
                         type: string
       additionalPrinterColumns:
-        - name: Query
-          type: string
-          jsonPath: .spec.promQL
         - name: Min
           type: integer
           jsonPath: .spec.minReplicas
@@ -97,4 +85,3 @@ spec:
         - name: Replicas
           type: integer
           jsonPath: .status.currentReplicas
-

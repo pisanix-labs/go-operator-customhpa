@@ -1,6 +1,6 @@
 # CustomHPA Operator (Golang)
 
-Um operator simples em Go que implementa um "Custom HPA" (Horizontal Pod Autoscaler) baseado em uma expressão PromQL. A cada intervalo, o controller avalia a consulta no Prometheus e ajusta a escala de um Deployment alvo, respeitando limites mínimos e máximos.
+Um operator simples em Go que implementa um "Custom HPA" (Horizontal Pod Autoscaler) baseado em configuração do próprio operator. A cada intervalo, o controller lê uma quantidade desejada de réplicas a partir de uma env var (`CHPA_DESIRED_REPLICAS`) e ajusta a escala de um Deployment alvo, respeitando limites mínimos e máximos.
 
 Este repositório é intencionalmente simples e modular para estudo dos principais conceitos de Operators no Kubernetes.
 
@@ -8,14 +8,14 @@ Este repositório é intencionalmente simples e modular para estudo dos principa
 
 - Grupo/Versão/Recurso: `monitoring.pisanix.dev/v1alpha1`, `CustomHPA` (plural `customhpas`).
 - Alvo suportado: `Deployment` (apps/v1).
-- Lógica: se a consulta PromQL retornar valor > 0, escala +1 (até `maxReplicas`); caso contrário, escala -1 (até `minReplicas`).
+- Lógica: lê `CHPA_DESIRED_REPLICAS` e aplica esse valor, limitado por `minReplicas`/`maxReplicas`.
 - Segurança/Recursos: usa RBAC para gerenciar `CustomHPA`, `Deployments` e emitir eventos.
 - Finalizers: adiciona um finalizer no `CustomHPA` e uma anotação no Deployment alvo; remove na deleção (demonstração de limpeza).
 - Eventos: emite eventos para sucessos e falhas importantes (ex.: "Scaled", "QueryFailed").
 
 ## Conceitos Essenciais
 
-- CR (Custom Resource): recurso customizado criado por você para estender a API do Kubernetes. Aqui, `CustomHPA` é um CR que descreve uma política de escala baseada em PromQL (arquivo `pkg/api/v1alpha1/customhpa_types.go`). Um CR instancia uma configuração específica do seu domínio, versionável e gerenciável via `kubectl`.
+- CR (Custom Resource): recurso customizado criado por você para estender a API do Kubernetes. Aqui, `CustomHPA` é um CR que descreve limites (`minReplicas`/`maxReplicas`), intervalo e o alvo (`targetRef`) a ser escalado (arquivo `pkg/api/v1alpha1/customhpa_types.go`). O valor desejado vem da configuração do operator.
 
 - CRD (CustomResourceDefinition): define o schema e o comportamento do seu CR na API do Kubernetes. Sem o CRD, o cluster não conhece o novo tipo. O CRD deste projeto está em `config/crd/bases/monitoring.pisanix.dev_customhpas.yaml`, com validação OpenAPI, subresource `status` e colunas extras.
 
@@ -23,7 +23,7 @@ Este repositório é intencionalmente simples e modular para estudo dos principa
 
 - Controller Pattern: um controller observa recursos (via informers) e reage a eventos, enfileirando pedidos de reconciliação. Este projeto usa `controller-runtime` para registrar o controller e watchers, ver `pkg/controllers/customhpa_controller.go` e `cmd/manager/main.go`.
 
-- Reconciliation Loop: a função `Reconcile` busca o CR, valida, observa o estado atual do alvo (Deployment e réplicas), consulta Prometheus e aplica as mudanças necessárias (escala up/down), então atualiza o `status`. A reconciliação é idempotente e requeue periódica é usada pelo `RequeueAfter` (intervalo configurável via `spec.intervalSeconds`).
+- Reconciliation Loop: a função `Reconcile` busca o CR, valida, observa o estado atual do alvo (Deployment e réplicas), calcula o desejado a partir da env `CHPA_DESIRED_REPLICAS` (com clamp entre `min`/`max`) e aplica as mudanças necessárias, então atualiza o `status`. A reconciliação é idempotente e requeue periódica é usada pelo `RequeueAfter` (intervalo configurável via `spec.intervalSeconds`).
 
 - Finalizers: strings adicionadas na lista de finalizers do CR para garantir limpeza antes da remoção real do objeto. Aqui, o finalizer `customhpa.pisanix.dev/finalizer` garante que a anotação `customhpa.pisanix.dev/managed` seja removida do Deployment gerenciado quando o `CustomHPA` for deletado.
 
@@ -36,7 +36,7 @@ Este repositório é intencionalmente simples e modular para estudo dos principa
 - `cmd/manager/main.go`: ponto de entrada do manager (configura logs, healthz, registra o controller e inicia o manager).
 - `pkg/api/v1alpha1/customhpa_types.go`: tipos do CRD (Spec/Status) e registro no scheme.
 - `pkg/controllers/customhpa_controller.go`: reconciliation loop, finalizer, emissão de eventos e aplicação de escala no Deployment alvo.
-- `pkg/prom/prometheus_client.go`: cliente HTTP simples para executar PromQL via `/api/v1/query` do Prometheus.
+- (Removido) Integração com Prometheus/PromQL.
 - `config/crd/bases/*.yaml`: manifesto do CRD.
 - `config/rbac/*.yaml`: RBAC (ServiceAccount, ClusterRole, ClusterRoleBinding).
 - `config/manager/deployment.yaml`: Deployment do controller (imagem exemplo, ajuste conforme seu registry).
@@ -53,8 +53,6 @@ metadata:
   name: sample-web-chpa
   namespace: default
 spec:
-  prometheusURL: http://prometheus.monitoring.svc.cluster.local:9090
-  promQL: sum(rate(http_requests_total{app="sample-web",status!~"5.."}[1m]))
   minReplicas: 1
   maxReplicas: 5
   intervalSeconds: 30
@@ -64,10 +62,22 @@ spec:
 ```
 
 Semântica simplificada:
-- `prometheusURL` e `promQL`: onde e o que consultar.
 - `minReplicas`/`maxReplicas`: limites de escala.
 - `intervalSeconds`: período de reconciliação (polling).
 - `targetRef`: identifica o Deployment alvo (neste exemplo, `apps/v1`, nome `sample-web`).
+
+## Configuração do Operator (réplicas desejadas)
+
+- Defina a env `CHPA_DESIRED_REPLICAS` no Deployment do controller para indicar o número desejado de réplicas.
+- O controller aplica `desired = clamp(CHPA_DESIRED_REPLICAS, minReplicas, maxReplicas)` para cada CR reconciliado.
+- Exemplo no manifesto do operator (`config/manager/deployment.yaml`):
+
+```
+env:
+  - name: CHPA_DESIRED_REPLICAS
+    value: "2"
+```
+
 
 ## Implantação
 
@@ -80,7 +90,7 @@ kubectl apply -f config/rbac/cluster_role.yaml --kubeconfig=./kind/kubeconfig-ki
 kubectl apply -f config/rbac/cluster_role_binding.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
 ```
 
-2) Ajuste a imagem no `config/manager/deployment.yaml` e aplique o controller:
+2) Ajuste a imagem e a env `CHPA_DESIRED_REPLICAS` no `config/manager/deployment.yaml` e aplique o controller:
 
 ```
 kubectl apply -f config/manager/deployment.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
@@ -108,7 +118,7 @@ kubectl get deploy,pods -l app=sample-web --kubeconfig=./kind/kubeconfig-kind.ya
 4) Observe o comportamento:
 
 - `kubectl get customhpa -A --kubeconfig=./kind/kubeconfig-kind.yaml` para listar.
-- `kubectl describe customhpa sample-web-chpa --kubeconfig=./kind/kubeconfig-kind.yaml` para ver condições e eventos (ex.: `Scaled`, `QueryFailed`).
+- `kubectl describe customhpa sample-web-chpa --kubeconfig=./kind/kubeconfig-kind.yaml` para ver condições e eventos (ex.: `Scaled`).
 - `kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml` para inspecionar réplicas.
 
 ## Build e Deploy com Makefile
@@ -123,7 +133,7 @@ make docker-push IMG=ghcr.io/pisanix-labs/customhpa-controller:latest
 make deploy IMG=ghcr.io/pisanix-labs/customhpa-controller:latest
 ```
 
-Para rodar local (fora do cluster) com seu `KUBECONFIG` atual:
+Para rodar local (fora do cluster) com seu `KUBECONFIG` atual (defina `CHPA_DESIRED_REPLICAS` antes de executar):
 
 ```
 go run ./cmd/manager
@@ -132,7 +142,7 @@ go run ./cmd/manager
 ## Notas e Limitações (para estudo)
 
 - Foco em `Deployment` como alvo. Para generalizar (StatefulSet, CRDs com subresource `scale` etc.), seria necessário usar a `Scale` subresource e RESTMapper/Discovery para mapear recursos.
-- O parser de resposta do Prometheus é minimalista e assumes `scalar` ou `vector` com um ponto de amostra; refine conforme sua necessidade (thresholds, janelas, estratégias de scale up/down, cooldowns, rate limits, etc.).
+- O valor global `CHPA_DESIRED_REPLICAS` é aplicado a todos os `CustomHPA` e limitado por `min`/`max` de cada CR (não há lógica por métrica nesta versão).
 - Sem geração de `DeepCopy` e manifests via kubebuilder; o código é didático e pode requerer ajustes/`go mod tidy` para compilar/rodar em sua máquina.
 
 ## Próximos Passos Sugeridos
@@ -140,4 +150,4 @@ go run ./cmd/manager
 - Adicionar suporte à subresource `scale` genérica (para qualquer `kind` com `scale`).
 - Introduzir thresholds e histerese (evitar flapping), além de janelas separadas de `scaleUp`/`scaleDown`.
 - Expor métricas do controller (ex.: tempo de reconciliação, erros) e dashboards.
-- Adicionar testes unitários de reconciliação (fakes do client e do prom).
+- Adicionar testes unitários de reconciliação.

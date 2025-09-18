@@ -4,12 +4,9 @@ metadata:
   name: sample-web-chpa
   namespace: default
 spec:
-  prometheusURL: http://prometheus.monitoring.svc.cluster.local:9090
-  promQL: sum(rate(http_requests_total{app="sample-web",status!~"5.."}[1m]))
   minReplicas: 1
   maxReplicas: 5
   intervalSeconds: 30
   targetRef:
     name: sample-web
     namespace: default
-

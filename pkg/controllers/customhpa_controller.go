@@ -18,7 +18,6 @@ import (
     record "k8s.io/client-go/tools/record"
 
     monitoringv1alpha1 "github.com/pisanix-labs/go-operator-customhpa/pkg/api/v1alpha1"
-    "github.com/pisanix-labs/go-operator-customhpa/pkg/prom"
 )
 
 const (
@@ -31,11 +30,12 @@ type CustomHPAReconciler struct {
     Scheme   *runtime.Scheme
     Recorder record.EventRecorder
     Log      logr.Logger
+    // DesiredReplicas is read from operator config (env) and clamped by each CR's min/max
+    DesiredReplicas int32
 }
 
 // Reconcile contains a simple custom HPA logic:
-// - Evaluates PromQL; if value > 0, scales up by 1 up to max.
-// - If value == 0, scales down by 1 down to min.
+// - Reads desired replicas from operator config (env var) and clamps to min/max from the CR.
 // - Adds finalizer and an annotation on the managed Deployment; removes them on deletion.
 func (r *CustomHPAReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
     _ = log.FromContext(ctx)
@@ -109,28 +109,13 @@ func (r *CustomHPAReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
         }
     }
 
-    // Evaluate PromQL
-    value, err := prom.QueryInstant(ctx, chpa.Spec.PrometheusURL, chpa.Spec.PromQL)
-    if err != nil {
-        r.setCondition(ctx, &chpa, metav1.ConditionFalse, "QueryFailed", err.Error())
-        r.Recorder.Eventf(&chpa, corev1.EventTypeWarning, "QueryFailed", "PromQL error: %v", err)
-        return r.requeueAfter(chpa), nil
+    // Desired replicas from operator config (env), clamped to min/max
+    desired := r.DesiredReplicas
+    if desired < chpa.Spec.MinReplicas {
+        desired = chpa.Spec.MinReplicas
     }
-
-    desired := currentReplicas(&dep)
-    if value > 0 {
-        desired = desired + 1
-        if desired > chpa.Spec.MaxReplicas {
-            desired = chpa.Spec.MaxReplicas
-        }
-    } else {
-        // value <= 0: scale down one
-        if desired > chpa.Spec.MinReplicas {
-            desired = desired - 1
-        }
-        if desired < chpa.Spec.MinReplicas {
-            desired = chpa.Spec.MinReplicas
-        }
+    if desired > chpa.Spec.MaxReplicas {
+        desired = chpa.Spec.MaxReplicas
     }
 
     // Apply scaling if needed
@@ -143,12 +128,11 @@ func (r *CustomHPAReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
         }
         now := metav1.Now()
         chpa.Status.LastScaleTime = &now
-        r.Recorder.Eventf(&chpa, corev1.EventTypeNormal, "Scaled", "Set replicas to %d (query=%.3f)", desired, value)
+        r.Recorder.Eventf(&chpa, corev1.EventTypeNormal, "Scaled", "Set replicas to %d (from operator config)", desired)
     }
 
     // Update status
     chpa.Status.CurrentReplicas = desired
-    chpa.Status.LastQueryValue = value
     r.setCondition(ctx, &chpa, metav1.ConditionTrue, "Reconciled", "Reconciliation successful")
     if err := r.Status().Update(ctx, &chpa); err != nil {
         return r.requeueAfter(chpa), err

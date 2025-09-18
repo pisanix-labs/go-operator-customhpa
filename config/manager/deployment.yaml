@@ -23,9 +23,11 @@ spec:
           args:
             - "--metrics-bind-address=:8080"
             - "--health-probe-bind-address=:8081"
+          env:
+            - name: CHPA_DESIRED_REPLICAS
+              value: "2"
           ports:
             - containerPort: 8080
               name: metrics
             - containerPort: 8081
               name: healthz
-

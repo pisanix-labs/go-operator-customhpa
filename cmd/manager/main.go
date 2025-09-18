@@ -4,6 +4,7 @@ import (
     "flag"
     "os"
     "time"
+    "strconv"
 
     appsv1 "k8s.io/api/apps/v1"
     corev1 "k8s.io/api/core/v1"
@@ -59,11 +60,22 @@ func main() {
         os.Exit(1)
     }
 
+    // Read desired replicas from env var CHPA_DESIRED_REPLICAS (default 1)
+    var desiredReplicas int32 = 1
+    if v := os.Getenv("CHPA_DESIRED_REPLICAS"); v != "" {
+        if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+            desiredReplicas = int32(n)
+        } else {
+            setupLog.Info("invalid CHPA_DESIRED_REPLICAS, using default 1", "value", v)
+        }
+    }
+
     if err = (&controllers.CustomHPAReconciler{
         Client:   mgr.GetClient(),
         Scheme:   mgr.GetScheme(),
         Recorder: mgr.GetEventRecorderFor("customhpa-controller"),
         Log:      ctrl.Log.WithName("controllers").WithName("CustomHPA"),
+        DesiredReplicas: desiredReplicas,
     }).SetupWithManager(mgr); err != nil {
         setupLog.Error(err, "unable to create controller", "controller", "CustomHPA")
         os.Exit(1)
