@@ -1,0 +1,130 @@
+# CustomHPA Operator (Golang)
+
+Um operator simples em Go que implementa um "Custom HPA" (Horizontal Pod Autoscaler) baseado em uma expressão PromQL. A cada intervalo, o controller avalia a consulta no Prometheus e ajusta a escala de um Deployment alvo, respeitando limites mínimos e máximos.
+
+Este repositório é intencionalmente simples e modular para estudo dos principais conceitos de Operators no Kubernetes.
+
+## Visão Geral
+
+- Grupo/Versão/Recurso: `monitoring.pisanix.dev/v1alpha1`, `CustomHPA` (plural `customhpas`).
+- Alvo suportado: `Deployment` (apps/v1).
+- Lógica: se a consulta PromQL retornar valor > 0, escala +1 (até `maxReplicas`); caso contrário, escala -1 (até `minReplicas`).
+- Segurança/Recursos: usa RBAC para gerenciar `CustomHPA`, `Deployments` e emitir eventos.
+- Finalizers: adiciona um finalizer no `CustomHPA` e uma anotação no Deployment alvo; remove na deleção (demonstração de limpeza).
+- Eventos: emite eventos para sucessos e falhas importantes (ex.: "Scaled", "QueryFailed").
+
+## Conceitos Essenciais
+
+- CR (Custom Resource): recurso customizado criado por você para estender a API do Kubernetes. Aqui, `CustomHPA` é um CR que descreve uma política de escala baseada em PromQL (arquivo `pkg/api/v1alpha1/customhpa_types.go`). Um CR instancia uma configuração específica do seu domínio, versionável e gerenciável via `kubectl`.
+
+- CRD (CustomResourceDefinition): define o schema e o comportamento do seu CR na API do Kubernetes. Sem o CRD, o cluster não conhece o novo tipo. O CRD deste projeto está em `config/crd/bases/monitoring.pisanix.dev_customhpas.yaml`, com validação OpenAPI, subresource `status` e colunas extras.
+
+- Operator: é um aplicativo (rodando dentro ou fora do cluster) que implementa automação operacional para um domínio específico, observando CRs e reconciliando o estado real com o estado desejado. Neste repo, o operator está em Go usando `controller-runtime` e roda o controller `CustomHPAReconciler`.
+
+- Controller Pattern: um controller observa recursos (via informers) e reage a eventos, enfileirando pedidos de reconciliação. Este projeto usa `controller-runtime` para registrar o controller e watchers, ver `pkg/controllers/customhpa_controller.go` e `cmd/manager/main.go`.
+
+- Reconciliation Loop: a função `Reconcile` busca o CR, valida, observa o estado atual do alvo (Deployment e réplicas), consulta Prometheus e aplica as mudanças necessárias (escala up/down), então atualiza o `status`. A reconciliação é idempotente e requeue periódica é usada pelo `RequeueAfter` (intervalo configurável via `spec.intervalSeconds`).
+
+- Finalizers: strings adicionadas na lista de finalizers do CR para garantir limpeza antes da remoção real do objeto. Aqui, o finalizer `customhpa.pisanix.dev/finalizer` garante que a anotação `customhpa.pisanix.dev/managed` seja removida do Deployment gerenciado quando o `CustomHPA` for deletado.
+
+- Events & Informers:
+  - Informers: caches/watchers gerenciados pelo `controller-runtime`, que observa `CustomHPA` e (own) `Deployments`. Embora a lógica seja simples, sob o capô o controller usa informers para eficiência e reatividade.
+  - Events: o controller registra eventos do tipo `Normal` e `Warning` (por exemplo, `Scaled`, `QueryFailed`, `TargetNotFound`) para facilitar o troubleshooting com `kubectl describe`.
+
+## Estrutura do Projeto
+
+- `cmd/manager/main.go`: ponto de entrada do manager (configura logs, healthz, registra o controller e inicia o manager).
+- `pkg/api/v1alpha1/customhpa_types.go`: tipos do CRD (Spec/Status) e registro no scheme.
+- `pkg/controllers/customhpa_controller.go`: reconciliation loop, finalizer, emissão de eventos e aplicação de escala no Deployment alvo.
+- `pkg/prom/prometheus_client.go`: cliente HTTP simples para executar PromQL via `/api/v1/query` do Prometheus.
+- `config/crd/bases/*.yaml`: manifesto do CRD.
+- `config/rbac/*.yaml`: RBAC (ServiceAccount, ClusterRole, ClusterRoleBinding).
+- `config/manager/deployment.yaml`: Deployment do controller (imagem exemplo, ajuste conforme seu registry).
+- `config/samples/*.yaml`: exemplo de `CustomHPA` para testar.
+
+## Exemplo de CR (resumo)
+
+Arquivo `config/samples/monitoring_v1alpha1_customhpa.yaml`:
+
+```yaml
+apiVersion: monitoring.pisanix.dev/v1alpha1
+kind: CustomHPA
+metadata:
+  name: sample-web-chpa
+  namespace: default
+spec:
+  prometheusURL: http://prometheus.monitoring.svc.cluster.local:9090
+  promQL: sum(rate(http_requests_total{app="sample-web",status!~"5.."}[1m]))
+  minReplicas: 1
+  maxReplicas: 5
+  intervalSeconds: 30
+  targetRef:
+    name: sample-web # Deployment apps/v1
+    namespace: default
+```
+
+Semântica simplificada:
+- `prometheusURL` e `promQL`: onde e o que consultar.
+- `minReplicas`/`maxReplicas`: limites de escala.
+- `intervalSeconds`: período de reconciliação (polling).
+- `targetRef`: identifica o Deployment alvo (neste exemplo, `apps/v1`, nome `sample-web`).
+
+## Implantação
+
+1) Aplique o CRD e o RBAC:
+
+```
+kubectl apply -f config/crd/bases/monitoring.pisanix.dev_customhpas.yaml
+kubectl apply -f config/rbac/service_account.yaml
+kubectl apply -f config/rbac/cluster_role.yaml
+kubectl apply -f config/rbac/cluster_role_binding.yaml
+```
+
+2) Ajuste a imagem no `config/manager/deployment.yaml` e aplique o controller:
+
+```
+kubectl apply -f config/manager/deployment.yaml
+```
+
+3) Crie o CR de exemplo e um Deployment alvo `sample-web`:
+
+```
+kubectl apply -f config/samples/monitoring_v1alpha1_customhpa.yaml
+```
+
+4) Observe o comportamento:
+
+- `kubectl get customhpa -A` para listar.
+- `kubectl describe customhpa sample-web-chpa` para ver condições e eventos (ex.: `Scaled`, `QueryFailed`).
+- `kubectl get deploy sample-web -o jsonpath='{.spec.replicas}'` para inspecionar réplicas.
+
+## Build e Deploy com Makefile
+
+- Ajuste `IMG` conforme seu registry (por padrão `ghcr.io/pisanix-labs/customhpa-controller:latest`).
+
+Comandos úteis:
+
+```
+make docker-build IMG=ghcr.io/pisanix-labs/customhpa-controller:latest
+make docker-push IMG=ghcr.io/pisanix-labs/customhpa-controller:latest
+make deploy IMG=ghcr.io/pisanix-labs/customhpa-controller:latest
+```
+
+Para rodar local (fora do cluster) com seu `KUBECONFIG` atual:
+
+```
+go run ./cmd/manager
+```
+
+## Notas e Limitações (para estudo)
+
+- Foco em `Deployment` como alvo. Para generalizar (StatefulSet, CRDs com subresource `scale` etc.), seria necessário usar a `Scale` subresource e RESTMapper/Discovery para mapear recursos.
+- O parser de resposta do Prometheus é minimalista e assumes `scalar` ou `vector` com um ponto de amostra; refine conforme sua necessidade (thresholds, janelas, estratégias de scale up/down, cooldowns, rate limits, etc.).
+- Sem geração de `DeepCopy` e manifests via kubebuilder; o código é didático e pode requerer ajustes/`go mod tidy` para compilar/rodar em sua máquina.
+
+## Próximos Passos Sugeridos
+
+- Adicionar suporte à subresource `scale` genérica (para qualquer `kind` com `scale`).
+- Introduzir thresholds e histerese (evitar flapping), além de janelas separadas de `scaleUp`/`scaleDown`.
+- Expor métricas do controller (ex.: tempo de reconciliação, erros) e dashboards.
+- Adicionar testes unitários de reconciliação (fakes do client e do prom).

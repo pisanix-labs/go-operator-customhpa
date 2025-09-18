@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customhpa-controller
+  namespace: default
+  labels:
+    app: customhpa-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: customhpa-controller
+  template:
+    metadata:
+      labels:
+        app: customhpa-controller
+    spec:
+      serviceAccountName: customhpa-controller
+      containers:
+        - name: manager
+          image: ghcr.io/your-org/customhpa-controller:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--metrics-bind-address=:8080"
+            - "--health-probe-bind-address=:8081"
+          ports:
+            - containerPort: 8080
+              name: metrics
+            - containerPort: 8081
+              name: healthz
+

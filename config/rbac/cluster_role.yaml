@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: customhpa-controller
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["monitoring.pisanix.dev"]
+    resources: ["customhpas", "customhpas/status", "customhpas/finalizers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+

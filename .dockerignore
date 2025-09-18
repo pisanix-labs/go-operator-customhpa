@@ -1,0 +1,12 @@
+.git
+bin
+dist
+vendor
+*.local
+*.swp
+*.swo
+*.log
+**/*.test
+**/*~
+**/#*#
+
