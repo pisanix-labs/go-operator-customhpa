@@ -74,29 +74,42 @@ Semântica simplificada:
 1) Aplique o CRD e o RBAC:
 
 ```
-kubectl apply -f config/crd/bases/monitoring.pisanix.dev_customhpas.yaml
-kubectl apply -f config/rbac/service_account.yaml
-kubectl apply -f config/rbac/cluster_role.yaml
-kubectl apply -f config/rbac/cluster_role_binding.yaml
+kubectl apply -f config/crd/bases/monitoring.pisanix.dev_customhpas.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl apply -f config/rbac/service_account.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl apply -f config/rbac/cluster_role.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl apply -f config/rbac/cluster_role_binding.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
 ```
 
 2) Ajuste a imagem no `config/manager/deployment.yaml` e aplique o controller:
 
 ```
-kubectl apply -f config/manager/deployment.yaml
+kubectl apply -f config/manager/deployment.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
 ```
 
-3) Crie o CR de exemplo e um Deployment alvo `sample-web`:
+3) Suba o Deployment alvo `sample-web` (NGINX) e depois crie o CR de exemplo:
 
 ```
-kubectl apply -f config/samples/monitoring_v1alpha1_customhpa.yaml
+# Deployment simples do NGINX
+kubectl apply -f k8s/sample-web-deployment.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+
+# (Opcional) Aguarde o rollout concluir
+kubectl rollout status deploy/sample-web --kubeconfig=./kind/kubeconfig-kind.yaml
+
+# Em seguida, aplique o CR CustomHPA que gerenciará o sample-web
+kubectl apply -f config/samples/monitoring_v1alpha1_customhpa.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+```
+
+Valide rapidamente o Deployment:
+
+```
+kubectl get deploy,pods -l app=sample-web --kubeconfig=./kind/kubeconfig-kind.yaml
 ```
 
 4) Observe o comportamento:
 
-- `kubectl get customhpa -A` para listar.
-- `kubectl describe customhpa sample-web-chpa` para ver condições e eventos (ex.: `Scaled`, `QueryFailed`).
-- `kubectl get deploy sample-web -o jsonpath='{.spec.replicas}'` para inspecionar réplicas.
+- `kubectl get customhpa -A --kubeconfig=./kind/kubeconfig-kind.yaml` para listar.
+- `kubectl describe customhpa sample-web-chpa --kubeconfig=./kind/kubeconfig-kind.yaml` para ver condições e eventos (ex.: `Scaled`, `QueryFailed`).
+- `kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml` para inspecionar réplicas.
 
 ## Build e Deploy com Makefile
 

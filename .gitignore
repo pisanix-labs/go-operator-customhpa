@@ -27,6 +27,7 @@ go.work.sum
 # env file
 .env
 manager
+kind/kubeconfig-kind.yaml
 
 # Editor/IDE
 # .idea/
