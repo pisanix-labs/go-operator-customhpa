@@ -78,48 +78,56 @@ env:
     value: "2"
 ```
 
+## Ambiente local
+
+- O script ops/kind/script.sh inicializa o clusters no kind e gera o kubeconfig, é necessário ter o kind instalado, após isso basta rodar o script
+- Na raiz do projeto execute o seguinte comando:
+
+```
+./ops/kind/script.sh
+```
 
 ## Implantação
 
 1) Aplique o CRD e o RBAC:
 
 ```
-kubectl apply -f config/crd/bases/monitoring.pisanix.dev_customhpas.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
-kubectl apply -f config/rbac/service_account.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
-kubectl apply -f config/rbac/cluster_role.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
-kubectl apply -f config/rbac/cluster_role_binding.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl apply -f config/crd/bases/monitoring.pisanix.dev_customhpas.yaml --kubeconfig=./ops/kind/kubeconfig-kind.yaml
+kubectl apply -f config/rbac/service_account.yaml --kubeconfig=./ops/kind/kubeconfig-kind.yaml
+kubectl apply -f config/rbac/cluster_role.yaml --kubeconfig=./ops/kind/kubeconfig-kind.yaml
+kubectl apply -f config/rbac/cluster_role_binding.yaml --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 ```
 
 2) Ajuste a imagem e a env `CHPA_DESIRED_REPLICAS` no `config/manager/deployment.yaml` e aplique o controller:
 
 ```
-kubectl apply -f config/manager/deployment.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl apply -f config/manager/deployment.yaml --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 ```
 
 3) Suba o Deployment alvo `sample-web` (NGINX) e depois crie o CR de exemplo:
 
 ```
 # Deployment simples do NGINX
-kubectl apply -f k8s/sample-web-deployment.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl apply -f ops/k8s/sample-web-deployment.yaml --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 
 # (Opcional) Aguarde o rollout concluir
-kubectl rollout status deploy/sample-web --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl rollout status deploy/sample-web --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 
 # Em seguida, aplique o CR CustomHPA que gerenciará o sample-web
-kubectl apply -f config/samples/monitoring_v1alpha1_customhpa.yaml --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl apply -f config/samples/monitoring_v1alpha1_customhpa.yaml --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 ```
 
 Valide rapidamente o Deployment:
 
 ```
-kubectl get deploy,pods -l app=sample-web --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl get deploy,pods -l app=sample-web --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 ```
 
 4) Observe o comportamento:
 
-- `kubectl get customhpa -A --kubeconfig=./kind/kubeconfig-kind.yaml` para listar.
-- `kubectl describe customhpa sample-web-chpa --kubeconfig=./kind/kubeconfig-kind.yaml` para ver condições e eventos (ex.: `Scaled`).
-- `kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml` para inspecionar réplicas.
+- `kubectl get customhpa -A --kubeconfig=./ops/kind/kubeconfig-kind.yaml` para listar.
+- `kubectl describe customhpa sample-web-chpa --kubeconfig=./ops/kind/kubeconfig-kind.yaml` para ver condições e eventos (ex.: `Scaled`).
+- `kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./ops/kind/kubeconfig-kind.yaml` para inspecionar réplicas.
 
 ## Alterar réplicas via variável de ambiente (ao vivo)
 
@@ -130,35 +138,35 @@ Passo a passo (usando o cluster Kind deste repo):
 1) Verifique o valor atual da env no operator:
 
 ```
-kubectl set env deploy/customhpa-controller --list -n default --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl set env deploy/customhpa-controller --list -n default --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 ```
 
 2) Altere o valor desejado (ex.: de 2 para 4):
 
 ```
 kubectl set env deploy/customhpa-controller -n default \
-  CHPA_DESIRED_REPLICAS=4 --kubeconfig=./kind/kubeconfig-kind.yaml
+  CHPA_DESIRED_REPLICAS=4 --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 
-kubectl rollout status deploy/customhpa-controller -n default --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl rollout status deploy/customhpa-controller -n default --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 ```
 
 3) Observe a reconciliação e a escala do alvo:
 
 ```
 # Eventos e condições do CustomHPA
-kubectl describe customhpa sample-web-chpa --kubeconfig=./kind/kubeconfig-kind.yaml
+kubectl describe customhpa sample-web-chpa --kubeconfig=./ops/kind/kubeconfig-kind.yaml
 
 # Réplicas aplicadas ao Deployment alvo
-kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml; echo
+kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./ops/kind/kubeconfig-kind.yaml; echo
 ```
 
 4) (Opcional) Teste o limite por `maxReplicas`: defina um valor acima do máximo (ex.: 10) e observe que o operator fará clamp para `maxReplicas` (5 no exemplo):
 
 ```
 kubectl set env deploy/customhpa-controller -n default \
-  CHPA_DESIRED_REPLICAS=10 --kubeconfig=./kind/kubeconfig-kind.yaml
-kubectl rollout status deploy/customhpa-controller -n default --kubeconfig=./kind/kubeconfig-kind.yaml
-kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./kind/kubeconfig-kind.yaml; echo
+  CHPA_DESIRED_REPLICAS=10 --kubeconfig=./ops/kind/kubeconfig-kind.yaml
+kubectl rollout status deploy/customhpa-controller -n default --kubeconfig=./ops/kind/kubeconfig-kind.yaml
+kubectl get deploy sample-web -o jsonpath='{.spec.replicas}' --kubeconfig=./ops/kind/kubeconfig-kind.yaml; echo
 ```
 
 Notas:

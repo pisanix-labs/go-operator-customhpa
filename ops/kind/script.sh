@@ -3,7 +3,7 @@ set -euo pipefail
 
 CLUSTER_NAME="operator-customhpa"
 NAMESPACE="default"
-KUBECONFIG_FILE="$(pwd)/kubeconfig-kind.yaml"
+KUBECONFIG_FILE="$(pwd)/ops/kind/kubeconfig-kind.yaml"
 
 echo "Tested on Kind v0.29.0, Go 1.24.2, Linux/amd64"
 echo
